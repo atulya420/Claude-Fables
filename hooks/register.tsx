@@ -34,7 +34,7 @@ const ROW_PX = 20
  * Rows kept for what sits under the art: the other mods' one-row bands and the
  * engine's own `n more` row. The art takes the rest, so the band never scrolls.
  */
-const RESERVED_ROWS = 7
+const RESERVED_ROWS = 11
 /** The art never grows past the stage's own height, nor shrinks below a readable strip. */
 const MAX_ART_PX = Math.round(H * SCALE)
 const MIN_ART_PX = 3 * ROW_PX
