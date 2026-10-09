@@ -163,7 +163,7 @@ test('/fables model switches the storyteller between Sonnet and Haiku, and remem
   expect((await run('model')).text).toContain('Haiku writes the story')
 })
 
-test('the band drawn again as the turn ends carries the scene on from where it was, instead of starting it over', async ($, on) => {
+test('the band drawn again as the turn starts or ends keeps its source, and a resize carries the scene on from where it was', async ($, on) => {
   const clock = world(on)
   on('model.complete', () => answer(JSON.stringify(SCENE)))
   on('turn.complete', () => ({ text: 'done' }))
@@ -185,16 +185,19 @@ test('the band drawn again as the turn ends carries the scene on from where it w
   // Drawn again in the same moment, it draws the same, so the desktop plays on.
   expect(await source({ isWorking: true })).toBe(first)
 
-  // Two seconds on, the turn ends: the band is drawn again (isWorking flips, and the box may change).
+  // Two seconds on, the turn ends and the band is drawn again (isWorking flips): the very same
+  // source, so the frame is not reloaded and nothing flickers as a prompt starts or ends.
   await clock.advance(2000)
-  for (const props of [{ isWorking: false }, { isWorking: false, bodyColumns: 140 }]) {
-    const again = await source(props)
-    // Carried on, not started over: typed as far as it was (the first line is done by now),
-    // and still ending after the drawing starts, or it would never be drawn at all.
-    expect(typingFrom(again)).toBeLessThan(0)
-    expect(typingFrom(again) + typingFor(again)).toBeGreaterThan(0)
-    expect(again).not.toBe(first)
-  }
+  expect(await source({ isWorking: false })).toBe(first)
+  expect(await source({ isWorking: true })).toBe(first)
+
+  // A new width does redraw the frame: carried on, not started over: typed as far as it was
+  // (the first line is done by now), and still ending after the drawing starts, or it would
+  // never be drawn at all.
+  const again = await source({ isWorking: false, bodyColumns: 140 })
+  expect(typingFrom(again)).toBeLessThan(0)
+  expect(typingFrom(again) + typingFor(again)).toBeGreaterThan(0)
+  expect(again).not.toBe(first)
 })
 
 test('resumeAt moves every animation back by the time already played', () => {

@@ -28,13 +28,31 @@ const PX_PER_COLUMN = 8
 /** CSS pixels per stage unit: the stage's H units come out this many times taller. */
 const SCALE = 1.5
 
+/** One terminal row in CSS pixels on the desktop. */
+const ROW_PX = 20
 /**
- * The band's box in CSS pixels: its whole width, at a fixed height so the art and
- * the caption keep one size whatever the window; the stage widens to fill it.
+ * Rows kept for what sits under the art: the other mods' one-row bands and the
+ * engine's own `n more` row. The art takes the rest, so the band never scrolls.
  */
-function bandBox(columns: number): { width: number; height: number } {
+const RESERVED_ROWS = 7
+/** The art never grows past the stage's own height, nor shrinks below a readable strip. */
+const MAX_ART_PX = Math.round(H * SCALE)
+const MIN_ART_PX = 3 * ROW_PX
+
+/**
+ * The band's box in CSS pixels: its whole width, and a height that fits the rows
+ * the band has left after the other mods' rows, so the art and the caption keep
+ * one size whatever the window and the band stays whole; the stage widens to fill it.
+ */
+function bandBox(columns: number, maxRows = Infinity, held?: number): { width: number; height: number } {
   const width = Number.isFinite(columns) && columns > 0 ? Math.round(columns * PX_PER_COLUMN) : W * SCALE
-  return { width, height: Math.round(H * SCALE) }
+  const room = Number.isFinite(maxRows) ? (maxRows - RESERVED_ROWS) * ROW_PX : MAX_ART_PX
+  const fit = Math.max(MIN_ART_PX, Math.min(MAX_ART_PX, Math.floor(room / ROW_PX) * ROW_PX))
+  // The height only moves when it must: shrinking the moment the art no longer fits, growing once
+  // there is clearly room. A row coming or going under it (the spinner as a turn starts) would
+  // otherwise redraw the art at a new size and the frame would flash.
+  const height = held === undefined || fit < held || fit - held >= 2 * ROW_PX ? fit : held
+  return { width, height }
 }
 
 /** The narrator's host in a session: Claude Code's clock, its model, the band, and how the band draws a scene. */
@@ -74,7 +92,7 @@ async function setOn($: EngineInterface, n: Director, at: Host, value: boolean) 
  * frame over then; so every drawing after the first is set to the scene's own
  * clock, and it carries on where it was instead of typing its caption again.
  */
-type Drawn = { scene: string; at: number; key: string; base: string }
+type Drawn = { scene: string; at: number; key: string; base: string; shown?: { props: string; source: string } }
 /** The drawing kept, and the band's box as last drawn, so a scene can be drawn the moment it goes up. */
 type Band = { drawn?: Drawn; box: { width: number; height: number } }
 
@@ -191,22 +209,28 @@ export const register: Register = (on, options) => {
     const { Box, Svg } = $.ui.resolve(e)
     // The interactive frame does not size itself from the markup (left alone it
     // is a 300x150 box), so give it the band's box; a new width draws anew.
-    band.box = bandBox(e.props.bodyColumns)
+    band.box = bandBox(e.props.bodyColumns, e.props.maxRows, band.box.height)
     const { width, height } = band.box
     const { base, at } = await draw($, band, current)
-    // To a tenth of a second, so drawings in the same moment stay the same.
-    const along = Math.floor(((await $.clock.now()) - at) / 100) / 10
-    const resumed = resumeAt(base, along)
+    // The source handed to the frame stays the same string until something that
+    // can restart it changes (a resize): a new
+    // string on every redraw reloads the frame and the band flickers while
+    // Claude works and the other mods' rows redraw it every moment.
+    const sig = `${e.props.bodyColumns}|${height}`
+    const shown = current && band.drawn?.shown?.props === sig ? band.drawn.shown : undefined
+    let source = shown?.source
+    if (source === undefined) {
+      // To a tenth of a second, so drawings in the same moment stay the same.
+      const along = Math.floor(((await $.clock.now()) - at) / 100) / 10
+      const resumed = resumeAt(base, along)
+      source = resumed.length <= MAX_SVG ? resumed : base
+      if (band.drawn) band.drawn.shown = { props: sig, source }
+    }
     return (
       <Box flexDirection="column">
-        <Svg
-          key="fables"
-          source={resumed.length <= MAX_SVG ? resumed : base}
-          alt={current.caption}
-          width={width}
-          height={height}
-          isInteractive
-        />
+        <Box key="fables" flexShrink={0} marginBottom={others ? 1 : 0}>
+          <Svg source={source} alt={current.caption} width={width} height={height} isInteractive />
+        </Box>
         {others ?? null}
       </Box>
     )
